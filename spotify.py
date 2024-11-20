@@ -4,18 +4,28 @@
 # https://qiita.com/Prgckwb/items/21ec6cdbfa7fcf5aa466（getByIdArtist, getTopSongsId）
 # https://qiita.com/sayuyuyu/items/4ca06a851fca41f6b270（getToPlaylist, getTrackFeatures, id_to_csv）
 
-import spotipy
+import spotipy, requests
 from pprint import pprint
 from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 import pandas as pd
 
-my_id = "07b0d9d93df64ced88fb8756932f8345"
-my_secret = "d16468dc91264cfc90e372ab37e73115"
-ccm = SpotifyClientCredentials(client_id=my_id, client_secret=my_secret)
+MY_ID = "07b0d9d93df64ced88fb8756932f8345"
+MY_SECRET = "d16468dc91264cfc90e372ab37e73115"
+ccm = SpotifyClientCredentials(client_id=MY_ID, client_secret=MY_SECRET)
 spotify = spotipy.Spotify(client_credentials_manager=ccm)
 
+url = "https://accounts.spotify.com/api/token"
+res = requests.post(
+    url,
+    {
+        "grant_type": "client_credentials",
+        "client_id": MY_ID,
+        "client_secret": MY_SECRET,
+    },
+)
 
-# 入力されたアーティスト名からIDを返す
+
+# [IN]アーティスト名 => [OUT]アーティストID
 def getIdByArtist(artist_name):
     results = spotify.search(q="artist:" + artist_name, type="artist")
     items = results["artists"]["items"]
@@ -24,26 +34,53 @@ def getIdByArtist(artist_name):
     return artist_id
 
 
-# 入力されたアーティストの上位曲とそのIDを出力
-def getTopSongsId(artist_name, num):
+# [IN]アーティスト名 => [OUT]上位曲とID
+def getTopSongsIds(artist_name):
     try:
         search_id = getIdByArtist(artist_name)
         artist_top_tracks = spotify.artist_top_tracks(search_id, country="JP")["tracks"]
 
-        songs_id = []
+        songs_ids = []
 
-        print(artist_name + f" Top{num} Songs")
+        print(artist_name + f" Top10 Songs")
         for i, artist_top_track in enumerate(artist_top_tracks):
-            songs_id.append(artist_top_track["id"])
+            songs_ids.append(artist_top_track["id"])
             print(i + 1, artist_top_track["id"], artist_top_track["name"])
-        return songs_id
+        return songs_ids
     except IndexError:
         print("IndexError has occurred!")
     except AttributeError:
         print("AttributeError has occurred!")
 
 
-# プレイリストから曲を取得
+# アーティスト名から全ての楽曲のIDと曲名を取得
+def musicIds_from_artist(artist_name):
+    artist_id = getIdByArtist(artist_name)
+    # アルバムのリスト作成
+    albums = []
+    results = spotify.artist_albums(artist_id, album_type="album,single", limit=50)
+    albums.extend(results["items"])
+    # アルバムIDを収集
+    album_ids = [album["id"] for album in albums]
+    # アルバムトラックのリストを作成
+    track_ids = []
+    for album_id in album_ids:
+        results = spotify.album_tracks(album_id, limit=50)
+        track_ids.extend(results["items"])
+    # 楽曲IDのリストを作成（重複排除）
+    musicIds = []
+    seen = set()
+    for track_id in track_ids:
+        if track_id["name"] not in seen:
+            music_dict = {}
+            music_dict["name"] = track_id["name"]
+            music_dict["id"] = track_id["id"]
+            musicIds.append(music_dict)
+            seen.add(track_id["name"])
+    return musicIds
+
+
+# [IN]プレイリストID => [OUT]各楽曲のIDリスト
 def get_to_playlist(playlist_id):
     playlist = spotify.playlist(playlist_id)
     track_ids = []
@@ -59,7 +96,7 @@ def get_to_playlist(playlist_id):
     return track_ids
 
 
-# 楽曲のIDから特徴量を取得
+# [ID]楽曲ID => [OUT]特徴量リスト
 def getTrackFeatures(id):
     meta = spotify.track(id)
     features = spotify.audio_features(id)
@@ -94,14 +131,14 @@ def getTrackFeatures(id):
     return track
 
 
-# 楽曲のIDリストから各楽曲についての特徴量をCSV化
-def id_to_csv(track_ids):
-    tracks = []
-    for track_id in track_ids:
-        track = getTrackFeatures(track_id)
-        tracks.append(track)
+# [IN]楽曲IDリスト => [OUT]各楽曲についての特徴量CSVファイル
+def id_to_csv(song_ids):
+    songs = []
+    for song_id in song_ids:
+        song = getTrackFeatures(song_id)
+        songs.append(song)
     df = pd.DataFrame(
-        tracks,
+        songs,
         columns=[
             "name",
             "artist",
@@ -117,14 +154,14 @@ def id_to_csv(track_ids):
             "valence",
         ],
     )
-    print(df)
-
     df.to_csv("songs.csv", encoding="utf-8", index=False)
     print("CSVファイルが作成されました。")
     return df
 
 
 if __name__ == "__main__":
-    num = 5
-    songs_id = getTopSongsId("Mrs.GREEN APPLE", num)
-    id_to_csv(songs_id)
+    artist = "Mrs. GREEN APPLE"
+    topsong_ids = getTopSongsIds(artist)
+    id_to_csv(topsong_ids)
+    musicIds = musicIds_from_artist(artist)
+    pprint(musicIds)
